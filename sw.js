@@ -1,6 +1,6 @@
 // Cached die App-Shell, damit die PWA nach dem ersten Laden auch offline läuft.
 
-const CACHE_NAME = 'PWAAppName-v1';
+const CACHE_NAME = 'whatsnext-v1';
 const APP_SHELL = [
   './',
   './index.html'

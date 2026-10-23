@@ -1,0 +1,2349 @@
+<!DOCTYPE html>
+<html lang="de" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>WhatsNext v0.7.0</title>
+
+  <!-- PWA & Web App Meta Tags -->
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="Entdecke deine nächsten Lieblingsfilme und -serien durch einfaches Swipen">
+  <link rel="manifest" id="manifestPlaceholder">
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#fff1f2',
+              500: '#f43f5e',
+              600: '#e11d48',
+              700: '#be123c',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #090d16;
+      color: #f8fafc;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Card Stack & Swipe Animations */
+    .stage-container {
+      position: relative;
+      width: 100%;
+      max-width: 400px;
+      height: 62vh;
+      max-height: 560px;
+      min-height: 420px;
+      perspective: 1000px;
+    }
+
+    .card-container {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 28px;
+      background: #1e293b;
+      box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.7), 0 10px 15px -5px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      cursor: grab;
+      will-change: transform;
+      touch-action: none;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+
+    .card-container:active {
+      cursor: grabbing;
+    }
+
+    .card-container.animating {
+      transition: transform 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease;
+    }
+
+    .card-behind {
+      transform: scale(0.94) translateY(18px);
+      opacity: 0.6;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .card-active {
+      z-index: 10;
+    }
+
+    /* Swipe Badges */
+    .badge {
+      position: absolute;
+      top: 36px;
+      padding: 0.5rem 1.25rem;
+      font-size: 1.75rem;
+      font-weight: 900;
+      border-radius: 14px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.1s ease;
+      z-index: 30;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+      backdrop-filter: blur(8px);
+    }
+
+    .badge-like {
+      left: 24px;
+      color: #22c55e;
+      border: 4px solid #22c55e;
+      transform: rotate(-15deg);
+      background-color: rgba(34, 197, 94, 0.25);
+    }
+
+    .badge-dislike {
+      right: 24px;
+      color: #f43f5e;
+      border: 4px solid #f43f5e;
+      transform: rotate(15deg);
+      background-color: rgba(244, 63, 94, 0.25);
+    }
+
+    .badge-info {
+      bottom: 110px;
+      top: auto;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #38bdf8;
+      border: 4px solid #38bdf8;
+      background-color: rgba(56, 189, 248, 0.25);
+    }
+
+    /* Action Buttons Hover & Scale */
+    .btn-action {
+      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .btn-action:hover:not(:disabled) {
+      transform: scale(1.12);
+    }
+    .btn-action:active:not(:disabled) {
+      transform: scale(0.92);
+    }
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="p-3 sm:p-5 flex flex-col justify-between items-center min-h-screen select-none">
+
+  <header class="w-full max-w-md py-2 px-3 flex justify-between items-center border-b border-slate-800/80">
+    <div class="flex items-center gap-2.5">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-rose-600 to-amber-500 flex items-center justify-center text-lg shadow-lg shadow-rose-500/20">
+        🎬
+      </div>
+      <div>
+        <h1 class="text-lg font-black tracking-wider bg-gradient-to-r from-rose-500 via-rose-400 to-amber-400 bg-clip-text text-transparent leading-none">
+          WHATSNEXT
+        </h1>
+        <span class="text-[10px] text-slate-400 font-medium">Finde deinen Filmabend</span>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <!-- Evaluation / Match Results Modal Button -->
+      <button id="matchResultsBtn" class="p-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 font-black shadow-md hover:brightness-110 transition flex items-center justify-center" aria-label="Auswertungs-Zentrale" title="Match-Auswertung öffnen">
+        🏆
+      </button>
+
+      <!-- Watchlist Modal Toggle -->
+      <button id="watchlistBtn" class="relative p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center justify-center" aria-label="Watchlist">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.684a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path>
+        </svg>
+        <span id="watchlistBadge" class="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-[10px] font-bold text-white rounded-full flex items-center justify-center hidden">0</span>
+      </button>
+
+      <!-- Settings / Filter Modal Toggle -->
+      <button id="settingsBtn" class="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center justify-center" aria-label="Einstellungen">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+        </svg>
+      </button>
+
+      <span class="text-[10px] font-mono px-2 py-1 bg-slate-800/80 text-slate-400 rounded-lg border border-slate-700">
+        v0.7.0
+      </span>
+    </div>
+  </header>
+
+  <main class="w-full max-w-md my-auto py-3 flex flex-col justify-center items-center">
+    
+    <!-- Active Match Banner (Guest Mode) -->
+    <div id="matchBanner" class="w-full mb-2 p-2 rounded-xl bg-gradient-to-r from-rose-900/60 to-slate-900 border border-rose-500/40 text-center flex justify-between items-center px-3 hidden">
+      <span class="text-xs font-semibold text-rose-200">🎯 Match-Session von <strong id="matchHostName" class="text-white">Host</strong></span>
+      <span class="text-[10px] bg-rose-500/30 text-rose-300 border border-rose-400/40 font-bold px-2 py-0.5 rounded-full">15 Titel</span>
+    </div>
+
+    <!-- Active Filter & API Indicator Header -->
+    <div class="w-full flex justify-between items-center px-2 mb-2 text-xs">
+      <span id="currentGenreLabel" class="text-slate-400 font-medium flex items-center gap-1.5 truncate max-w-[250px]">
+        <span class="w-2 h-2 rounded-full bg-rose-500 inline-block shrink-0"></span>
+        <span class="truncate"><strong class="text-slate-200" id="selectedGenreText">Alle Filter aktiv</strong></span>
+      </span>
+      <div class="flex items-center gap-2 shrink-0">
+        <span id="apiStatusBadge" class="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">Offline Paket</span>
+        <span id="cardProgressText" class="text-slate-500 font-mono">0 / 0</span>
+      </div>
+    </div>
+
+    <!-- Stage Container with Background Stack Card -->
+    <div class="stage-container" id="stage">
+      
+      <!-- Card Stack Background Element -->
+      <div class="card-container card-behind" id="bgCard">
+        <div class="absolute inset-0 bg-slate-900/80 z-10"></div>
+        <img id="bgMoviePoster" class="absolute inset-0 w-full h-full object-cover opacity-30" src="" alt="">
+        <div class="card-info relative z-20 p-6 space-y-2">
+          <div class="h-4 w-20 bg-slate-700 rounded animate-pulse"></div>
+          <div class="h-6 w-3/4 bg-slate-700 rounded animate-pulse"></div>
+        </div>
+      </div>
+
+      <!-- Main Active Movie Card -->
+      <div class="card-container card-active" id="movieCard">
+        <!-- Visual Feedback Badges -->
+        <div class="badge badge-like" id="badgeLike">LIKE</div>
+        <div class="badge badge-dislike" id="badgeDislike">NOPE</div>
+        <div class="badge badge-info" id="badgeInfo">DETAILS</div>
+
+        <!-- Backdrop Poster Image -->
+        <img id="moviePoster" class="absolute inset-0 w-full h-full object-cover z-0" src="" alt="Poster">
+
+        <!-- Backdrop overlay gradient for legibility -->
+        <div class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-transparent z-0 pointer-events-none"></div>
+
+        <!-- Top Header Tags inside Card -->
+        <div class="absolute top-4 left-4 right-4 flex justify-between items-center z-10 pointer-events-none">
+          <span id="movieGenre" class="px-3 py-1 text-xs font-bold bg-slate-950/70 backdrop-blur-md text-rose-400 rounded-full border border-rose-500/30 shadow-md">
+            Lade Genre...
+          </span>
+          <span id="movieRating" class="px-2.5 py-1 text-xs font-extrabold bg-amber-500/90 text-slate-950 rounded-full flex items-center gap-1 shadow-md">
+            ⭐ 0.0
+          </span>
+        </div>
+
+        <!-- Card Information Bottom Content -->
+        <div class="card-info relative z-10 p-5 space-y-2">
+          <div class="flex items-baseline justify-between gap-2">
+            <h2 id="movieTitle" class="text-2xl font-black tracking-tight text-white leading-snug drop-shadow-md">
+              Lade Filme...
+            </h2>
+            <span id="movieYear" class="text-sm font-bold text-slate-400 shrink-0"></span>
+          </div>
+
+          <p id="movieOverview" class="text-xs sm:text-sm text-slate-300 line-clamp-3 leading-relaxed drop-shadow">
+            Bitte warten, Filmdaten werden aufbereitet...
+          </p>
+
+          <!-- Streaming & Runtime Badges -->
+          <div id="streamingBadges" class="flex items-center gap-1.5 pt-1">
+            <!-- Dynamic Badges Inserted Here -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="w-full max-w-md py-3 px-2 flex justify-around items-center z-10">
+    <!-- Undo / Rewind Button -->
+    <button class="btn-action w-12 h-12 rounded-full bg-slate-800/90 border border-slate-700 text-amber-400 text-lg flex items-center justify-center shadow-lg hover:bg-slate-700 focus:outline-none disabled:opacity-30 disabled:cursor-not-allowed" id="undoBtn" aria-label="Zurück" title="Vorherigen Film wiederholen">
+      ↺
+    </button>
+
+    <!-- Dislike Button -->
+    <button class="btn-action w-16 h-16 rounded-full bg-slate-900 border-2 border-rose-500 text-rose-500 text-2xl flex items-center justify-center shadow-xl shadow-rose-500/20 hover:bg-rose-500/10 focus:outline-none disabled:opacity-30 disabled:cursor-not-allowed" id="dislikeBtn" aria-label="Dislike">
+      ✕
+    </button>
+
+    <!-- Detailed Info Button -->
+    <button class="btn-action w-12 h-12 rounded-full bg-slate-800/90 border border-slate-700 text-sky-400 text-lg flex items-center justify-center shadow-lg hover:bg-slate-700 focus:outline-none disabled:opacity-30 disabled:cursor-not-allowed" id="infoBtn" aria-label="Info" title="Details anzeigen">
+      ℹ
+    </button>
+
+    <!-- Like Button -->
+    <button class="btn-action w-16 h-16 rounded-full bg-slate-900 border-2 border-emerald-500 text-emerald-500 text-2xl flex items-center justify-center shadow-xl shadow-emerald-500/20 hover:bg-emerald-500/10 focus:outline-none disabled:opacity-30 disabled:cursor-not-allowed" id="likeBtn" aria-label="Like">
+      ♥
+    </button>
+  </footer>
+
+  <!-- Watchlist Modal -->
+  <div id="watchlistModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex justify-center items-end sm:items-center p-0 sm:p-4 hidden opacity-0 transition-opacity duration-300">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-t-3xl sm:rounded-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/90 sticky top-0 z-10">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">❤️</span>
+          <h2 class="text-lg font-bold text-white">Meine Watchlist (<span id="watchlistCount">0</span>)</h2>
+        </div>
+        <button id="closeWatchlistBtn" class="text-slate-400 hover:text-white p-2 rounded-lg bg-slate-800">✕</button>
+      </div>
+
+      <div id="watchlistContent" class="p-4 overflow-y-auto space-y-3 flex-1">
+        <!-- Dynamic list of liked movies -->
+      </div>
+
+      <div class="p-3 border-t border-slate-800 bg-slate-900/90 flex justify-between items-center text-xs text-slate-400">
+        <span>Gefällt dir ein Film? Tippe für Details!</span>
+        <button id="clearWatchlistBtn" class="text-rose-400 hover:underline">Watchlist leeren</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Modal -->
+  <div id="detailModal" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex justify-center items-center p-4 hidden opacity-0 transition-opacity duration-300">
+    <div id="detailCard" class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative select-none">
+      
+      <!-- Drag Handle Header & Gesture Hint -->
+      <div id="detailDragHeader" class="w-full py-2.5 px-4 bg-slate-900/90 border-b border-slate-800/80 flex flex-col items-center justify-center cursor-grab active:cursor-grabbing touch-none select-none z-30 shrink-0">
+        <div class="w-12 h-1.5 bg-slate-500/70 rounded-full mb-1"></div>
+        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Wischen: ↓ Schließen | ← NOPE | LIKE →</span>
+      </div>
+
+      <!-- Detail Navigation Indicator Overlay Badge -->
+      <div id="detailSwipeBadge" class="absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider opacity-0 pointer-events-none transition-opacity duration-150 backdrop-blur-md shadow-xl border">
+        <!-- Dynamic badge inserted during drag -->
+      </div>
+
+      <button id="closeDetailBtn" class="absolute top-3 right-3 z-40 text-white bg-slate-950/70 hover:bg-slate-950 p-2 rounded-full backdrop-blur-md border border-slate-700">✕</button>
+      
+      <div class="relative h-48 w-full shrink-0 touch-none" id="detailPosterArea">
+        <img id="detailPoster" class="w-full h-full object-cover" src="" alt="Poster">
+        <div class="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
+        <div class="absolute bottom-3 left-4 right-4 flex justify-between items-end">
+          <div>
+            <span id="detailGenre" class="text-xs px-2.5 py-0.5 rounded-full bg-rose-500/30 text-rose-300 border border-rose-500/40 font-semibold"></span>
+            <h3 id="detailTitle" class="text-2xl font-black text-white mt-1 leading-tight"></h3>
+          </div>
+          <span id="detailRating" class="text-sm font-bold bg-amber-500 text-slate-950 px-2 py-1 rounded-lg"></span>
+        </div>
+      </div>
+
+      <!-- Detail Scrollable Body -->
+      <div id="detailScrollBody" class="p-5 overflow-y-auto space-y-4 text-sm text-slate-300 flex-1">
+        
+        <!-- Embedded YouTube Trailer Container -->
+        <div id="trailerEmbedContainer" class="hidden rounded-xl overflow-hidden aspect-video w-full bg-slate-950 border border-slate-800 shadow-lg my-2">
+          <!-- Dynamic YouTube iFrame player inserted here -->
+        </div>
+
+        <div>
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Handlung</h4>
+          <p id="detailOverview" class="leading-relaxed text-slate-200"></p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800 text-xs">
+          <div>
+            <span class="text-slate-500 block">Erscheinungsjahr:</span>
+            <strong id="detailYear" class="text-slate-200"></strong>
+          </div>
+          <div>
+            <span class="text-slate-500 block">Laufzeit & Regie:</span>
+            <strong id="detailDirector" class="text-slate-200"></strong>
+          </div>
+        </div>
+
+        <div class="pt-2 border-t border-slate-800">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Verfügbar auf</h4>
+          <div id="detailProviders" class="flex flex-wrap gap-2 pt-1">
+            <!-- Dynamic provider badges -->
+          </div>
+        </div>
+
+        <div class="pt-2 flex gap-2">
+          <a id="trailerLink" href="#" target="_blank" class="flex-1 py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold flex items-center justify-center gap-1.5 transition text-xs shadow-lg shadow-rose-600/30">
+            <span>▶</span> Trailer
+          </a>
+          <a id="rottenTomatoesLink" href="#" target="_blank" class="flex-1 py-2.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold flex items-center justify-center gap-1.5 transition text-xs shadow-lg shadow-amber-600/30">
+            <span>🍅</span> Rotten Tomatoes
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex justify-center items-center p-4 hidden opacity-0 transition-opacity duration-300">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-5 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">⚙ Einstellungen & Filter</h3>
+        <button id="closeSettingsBtn" class="text-slate-400 hover:text-white p-1 rounded-lg">✕</button>
+      </div>
+
+      <!-- Start Match Session Button -->
+      <div class="p-3 rounded-xl bg-gradient-to-r from-rose-900/40 via-amber-900/30 to-slate-800 border border-rose-500/40 space-y-2">
+        <div class="flex items-center gap-2">
+          <span class="text-lg">🎯</span>
+          <h4 class="text-xs font-bold uppercase text-rose-300">Sammelbox / Match-Gruppe</h4>
+        </div>
+        <p class="text-[11px] text-slate-300 leading-normal">
+          Erstelle ein Set aus 15 Filmen für deine Freunde und vergleiche eure gemeinsamen Swipes!
+        </p>
+        <button id="startMatchSessionBtn" class="w-full py-2.5 px-3 bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white text-xs font-bold rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+          <span>🎯</span> Match-Session starten (15 Titel)
+        </button>
+      </div>
+
+      <!-- Medientyp (Filme & Serien) Multi-Selection Chips -->
+      <div class="space-y-2">
+        <div class="flex justify-between items-center">
+          <label class="text-xs font-bold uppercase text-slate-400">Medientyp (Filme & Serien)</label>
+          <span id="mediaTypeCountLabel" class="text-[11px] text-rose-400 font-medium">Beide</span>
+        </div>
+        <div id="mediaTypeChipsContainer" class="flex flex-wrap gap-2 pt-1">
+          <!-- Dynamic Media Type Chips -->
+        </div>
+      </div>
+
+      <!-- Genre Multi-Selection Chips -->
+      <div class="space-y-2 pt-2 border-t border-slate-800">
+        <div class="flex justify-between items-center">
+          <label class="text-xs font-bold uppercase text-slate-400">Genre-Filter</label>
+          <span id="genreCountLabel" class="text-[11px] text-rose-400 font-medium">Alle</span>
+        </div>
+        <div id="genreChipsContainer" class="flex flex-wrap gap-2 pt-1">
+          <!-- Dynamic Genre Chips -->
+        </div>
+      </div>
+
+      <!-- Country Multi-Selection Chips -->
+      <div class="space-y-2 pt-2 border-t border-slate-800">
+        <div class="flex justify-between items-center">
+          <label class="text-xs font-bold uppercase text-slate-400">Herkunftsland-Filter</label>
+          <span id="countryCountLabel" class="text-[11px] text-rose-400 font-medium">Alle</span>
+        </div>
+        <div id="countryChipsContainer" class="flex flex-wrap gap-2 pt-1">
+          <!-- Dynamic Country Chips -->
+        </div>
+      </div>
+
+      <!-- Filmjahr / Epoche Filter Chips -->
+      <div class="space-y-2 pt-2 border-t border-slate-800">
+        <div class="flex justify-between items-center">
+          <label class="text-xs font-bold uppercase text-slate-400">Filmjahr / Epoche</label>
+          <span id="eraCountLabel" class="text-[11px] text-rose-400 font-medium">Alle</span>
+        </div>
+        <div id="eraChipsContainer" class="flex flex-wrap gap-2 pt-1">
+          <!-- Dynamic Era Chips -->
+        </div>
+      </div>
+
+      <!-- Filmlänge / Laufzeit Filter Chips -->
+      <div class="space-y-2 pt-2 border-t border-slate-800">
+        <div class="flex justify-between items-center">
+          <label class="text-xs font-bold uppercase text-slate-400">Filmlänge / Laufzeit</label>
+          <span id="runtimeCountLabel" class="text-[11px] text-rose-400 font-medium">Alle</span>
+        </div>
+        <div id="runtimeChipsContainer" class="flex flex-wrap gap-2 pt-1">
+          <!-- Dynamic Runtime Chips -->
+        </div>
+      </div>
+
+      <!-- Trailer Language Filter Chips -->
+      <div class="space-y-2 pt-2 border-t border-slate-800">
+        <div class="flex justify-between items-center">
+          <label class="text-xs font-bold uppercase text-slate-400">Trailer-Sprache</label>
+          <span id="trailerLangLabel" class="text-[11px] text-rose-400 font-medium">Deutsch</span>
+        </div>
+        <div id="trailerLangChipsContainer" class="flex flex-wrap gap-2 pt-1">
+          <!-- Dynamic Trailer Language Chips -->
+        </div>
+      </div>
+
+      <!-- TMDB API Key Integration -->
+      <div class="space-y-2 pt-2 border-t border-slate-800">
+        <div class="flex justify-between items-center">
+          <label class="text-xs font-bold uppercase text-slate-400">TMDB API Key</label>
+          <span id="keyStatusText" class="text-[10px] text-emerald-400 font-semibold hidden">✓ Verbindung aktiv</span>
+        </div>
+        <input type="password" id="tmdbApiKeyInput" placeholder="Füge deinen TMDB API-Schlüssel ein..." class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl p-3 text-xs focus:outline-none focus:border-rose-500">
+        
+        <div class="flex gap-2 pt-1">
+          <button id="shareKeyBtn" type="button" class="w-full py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+            <span>🔗</span> App-Link mit API-Key teilen
+          </button>
+        </div>
+        <p id="shareStatusMsg" class="text-[11px] text-emerald-400 font-medium hidden">✓ Link mit API-Schlüssel kopiert!</p>
+
+        <p class="text-[11px] text-slate-400 leading-normal">
+          Mit einem Key lädt die App fortlaufend unbegrenzt neue Filme von TMDB nach. Erzeuge einen Einladungslink für deine Freunde!
+        </p>
+      </div>
+
+      <!-- Reset Progress -->
+      <div class="pt-3 border-t border-slate-800 flex justify-between items-center">
+        <span class="text-xs text-slate-400">Swipe-Fortschritt</span>
+        <button id="resetProgressBtn" class="px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold hover:bg-rose-500/30">
+          Fortschritt zurücksetzen
+        </button>
+      </div>
+
+      <button id="saveSettingsBtn" class="w-full py-3 rounded-xl bg-rose-600 hover:bg-rose-500 font-bold text-white transition shadow-lg shadow-rose-600/30">
+        Übernehmen & Filme Laden
+      </button>
+    </div>
+  </div>
+
+  <!-- End of Match Session / Host Share Modal -->
+  <div id="sessionEndModal" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex justify-center items-center p-4 hidden opacity-0 transition-opacity duration-300">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4">
+      <div class="text-center space-y-1">
+        <span class="text-4xl">🎉</span>
+        <h3 id="sessionEndTitle" class="text-xl font-black text-white">Match-Session beendet!</h3>
+        <p id="sessionEndSubtitle" class="text-xs text-slate-400">Du hast alle 15 Titel bewertet.</p>
+      </div>
+
+      <!-- Host Action View -->
+      <div id="hostShareSection" class="space-y-3 pt-2">
+        <label class="block text-xs font-bold uppercase text-slate-400">Dein Name (Host):</label>
+        <input type="text" id="hostNameInput" placeholder="z. B. Alex" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl p-3 text-xs focus:outline-none focus:border-rose-500 font-bold">
+        
+        <button id="generateSessionLinkBtn" class="w-full py-3 bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white text-xs font-extrabold rounded-xl shadow-lg transition">
+          🔗 Einladungslink generieren & kopieren
+        </button>
+        <p id="hostShareCopyMsg" class="text-center text-xs text-emerald-400 font-semibold hidden">✓ Link in die Zwischenablage kopiert!</p>
+      </div>
+
+      <!-- Guest Action View -->
+      <div id="guestCodeSection" class="space-y-3 pt-2 hidden">
+        <label class="block text-xs font-bold uppercase text-slate-400">Dein Name (Gast):</label>
+        <input type="text" id="guestNameInput" placeholder="z. B. Sarah" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl p-3 text-xs focus:outline-none focus:border-rose-500 font-bold">
+
+        <button id="copyMatchCodeBtn" class="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-extrabold rounded-xl shadow-lg transition">
+          📋 Match-Code kopieren
+        </button>
+        <p id="guestCopyMsg" class="text-center text-xs text-emerald-400 font-semibold hidden">✓ Match-Code kopiert! Schicke ihn an den Host.</p>
+      </div>
+
+      <div class="pt-2 text-center">
+        <button id="closeSessionEndBtn" class="text-xs text-slate-400 hover:text-white underline">
+          Zurück zur App
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Evaluation Center Modal (Auswertungs-Zentrale) -->
+  <div id="matchResultsModal" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex justify-center items-center p-4 hidden opacity-0 transition-opacity duration-300">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/90 sticky top-0 z-10">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">🏆</span>
+          <div>
+            <h2 class="text-base font-bold text-white leading-none">Match-Auswertung</h2>
+            <span class="text-[10px] text-slate-400">Füge die Match-Codes deiner Freunde ein</span>
+          </div>
+        </div>
+        <button id="closeMatchResultsBtn" class="text-slate-400 hover:text-white p-2 rounded-lg bg-slate-800">✕</button>
+      </div>
+
+      <div class="p-4 overflow-y-auto space-y-4 flex-1">
+        <div class="space-y-1.5">
+          <label class="text-xs font-bold uppercase text-slate-400">Match-Codes einfügen (1 Code pro Zeile):</label>
+          <textarea id="matchCodesInput" rows="3" placeholder="WN:Alex:110011001100110&#10;WN:Sarah:101010101010101" class="w-full bg-slate-800 border border-slate-700 text-white rounded-xl p-3 text-xs font-mono focus:outline-none focus:border-rose-500"></textarea>
+          <button id="calculateMatchesBtn" class="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow-lg transition">
+            ⚡ Matches berechnen
+          </button>
+        </div>
+
+        <div id="matchesResultsList" class="space-y-3 pt-2">
+          <div class="text-center py-8 text-slate-500 space-y-1">
+            <span class="text-3xl block">🍿</span>
+            <p class="text-xs">Noch keine Match-Codes berechnet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Safely wrap Manifest & ServiceWorker for sandboxed preview environments
+    try {
+      const manifestData = {
+        "name": "WhatsNext",
+        "short_name": "WhatsNext",
+        "start_url": ".",
+        "display": "standalone",
+        "background_color": "#0f172a",
+        "theme_color": "#0f172a",
+        "icons": [
+          {
+            "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>",
+            "sizes": "192x192 512x512",
+            "type": "image/svg+xml"
+          }
+        ]
+      };
+      const manifestBlob = new Blob([JSON.stringify(manifestData)], { type: 'application/json' });
+      const manifestUrl = URL.createObjectURL(manifestBlob);
+      document.getElementById('manifestPlaceholder')?.setAttribute('href', manifestUrl);
+    } catch (e) {
+      console.warn('Manifest in Vorschau-Modus übersprungen:', e);
+    }
+
+    const mockMovies = [
+      {
+        id: 'movie_1',
+        type: 'movie',
+        title: 'Inception',
+        year: '2010',
+        rating: '8.8',
+        genre: 'Sci-Fi',
+        country: 'US',
+        runtime: '148 Min',
+        director: 'Christopher Nolan',
+        overview: 'Ein Dieb, der Unternehmensgeheimnisse durch Traum-Sharing stiehlt, erhält die Chance auf ein normales Leben durch eine fast unmögliche Inception.',
+        poster: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=800&auto=format&fit=crop',
+        providers: ['Netflix', 'Amazon Prime']
+      },
+      {
+        id: 'movie_2',
+        type: 'movie',
+        title: 'Matrix',
+        year: '1999',
+        rating: '8.7',
+        genre: 'Sci-Fi',
+        country: 'US',
+        runtime: '136 Min',
+        director: 'Lana & Lilly Wachowski',
+        overview: 'Ein Computerhacker erfährt von mysteriösen Rebellen über die wahren Hintergründe seiner scheinbaren Realität und seinen Platz im Kampf gegen Maschinen.',
+        poster: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?q=80&w=800&auto=format&fit=crop',
+        providers: ['WOW', 'Amazon Prime']
+      },
+      {
+        id: 'tv_1',
+        type: 'tv',
+        title: 'Dark',
+        year: '2017',
+        rating: '8.7',
+        genre: 'Sci-Fi',
+        country: 'DE',
+        runtime: '3 Staffeln',
+        director: 'Baran bo Odar',
+        overview: 'Das Verschwinden zweier Kinder in der deutschen Kleinstadt Winden bringt die verlogene Doppelmoral und die dunklen Geheimnisse vier benachbarter Familien ans Licht.',
+        poster: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=800&auto=format&fit=crop',
+        providers: ['Netflix']
+      },
+      {
+        id: 'movie_3',
+        type: 'movie',
+        title: 'Parasite',
+        year: '2019',
+        rating: '8.5',
+        genre: 'Drama',
+        country: 'KR',
+        runtime: '132 Min',
+        director: 'Bong Joon-ho',
+        overview: 'Die verarmte Familie Kim schleust sich durch gefälschte Dokumente schrittweise als Personal bei der wohlhabenden Familie Park ein.',
+        poster: 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=800&auto=format&fit=crop',
+        providers: ['Amazon Prime']
+      },
+      {
+        id: 'tv_2',
+        type: 'tv',
+        title: 'Stranger Things',
+        year: '2016',
+        rating: '8.7',
+        genre: 'Sci-Fi',
+        country: 'US',
+        runtime: '4 Staffeln',
+        director: 'Duffer-Brüder',
+        overview: 'Als ein kleiner Junge spurlos verschwindet, deckt eine Kleinstadt ein Geheimnis um geheime Experimente und ein mysteriöses Mädchen auf.',
+        poster: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=800&auto=format&fit=crop',
+        providers: ['Netflix']
+      },
+      {
+        id: 'movie_4',
+        type: 'movie',
+        title: 'Pulp Fiction',
+        year: '1994',
+        rating: '8.9',
+        genre: 'Krimi',
+        country: 'US',
+        runtime: '154 Min',
+        director: 'Quentin Tarantino',
+        overview: 'Die Lebenswege zweier mobiler Auftragsmörder, eines Profi-Boxers und einer Gangsterbraut verweben sich in bizarre Episoden.',
+        poster: 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?q=80&w=800&auto=format&fit=crop',
+        providers: ['Paramount+', 'Apple TV']
+      },
+      {
+        id: 'movie_5',
+        type: 'movie',
+        title: 'Chihiros Reise ins Zauberland',
+        year: '2001',
+        rating: '8.6',
+        genre: 'Animation',
+        country: 'JP',
+        runtime: '125 Min',
+        director: 'Hayao Miyazaki',
+        overview: 'Die 10-jährige Chihiro gerät in eine zauberhafte Welt voller Geister und Götter und muss ihren Mut beweisen, um ihre Eltern zu retten.',
+        poster: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=800&auto=format&fit=crop',
+        providers: ['Netflix']
+      }
+    ];
+
+    let movieDeck = [...mockMovies];
+    let currentIndex = 0;
+    let likedMovies = [];
+    let dislikedMovies = [];
+    let swipeHistory = [];
+    
+    // Multi-select state arrays
+    let currentSelectedMediaTypes = ['ALL'];
+    let currentSelectedGenres = ['ALL'];
+    let currentSelectedCountries = ['ALL'];
+    let currentSelectedEras = ['ALL'];
+    let currentSelectedRuntimes = ['ALL'];
+    let currentTrailerLanguage = 'Deutsch';
+
+    let tmdbApiKey = '';
+    let currentDetailMovie = null;
+    
+    // TMDB Pagination & Loading State
+    let tmdbPage = 1;
+    let isLoadingMoreTmdb = false;
+
+    // --- Sammelbox / Match Session State ---
+    let isSessionMode = false;
+    let isGuestMode = false;
+    let sessionHostName = "Host";
+    let sessionBitmask = []; // Array of 1s (like) and 0s (dislike) corresponding to 15 titles
+    let sessionMovieIds = []; // 15 exact TMDB / mock IDs
+
+    // Media Type Options
+    const mediaTypeOptions = [
+      { id: "movie", label: "🎬 Filme" },
+      { id: "tv", label: "📺 Serien" }
+    ];
+
+    // Available Genre Options
+    const genreOptions = [
+      { id: "Sci-Fi", label: "Sci-Fi", tmdb: "878" },
+      { id: "Action", label: "Action", tmdb: "28" },
+      { id: "Drama", label: "Drama", tmdb: "18" },
+      { id: "Krimi", label: "Krimi", tmdb: "80" },
+      { id: "Animation", label: "Animation", tmdb: "16" }
+    ];
+
+    // Available Country Options
+    const countryOptions = [
+      { id: "US", label: "🇺🇸 USA" },
+      { id: "DE", label: "🇩🇪 Deutschland" },
+      { id: "GB", label: "🇬🇧 UK" },
+      { id: "FR", label: "🇫🇷 Frankreich" },
+      { id: "JP", label: "🇯🇵 Japan" },
+      { id: "KR", label: "🇰🇷 Südkorea" },
+      { id: "IT", label: "🇮🇹 Italien" },
+      { id: "ES", label: "🇪🇸 Spanien" },
+      { id: "IN", label: "🇮🇳 Indien" }
+    ];
+
+    // Filmjahr / Era Options
+    const eraOptions = [
+      { id: "CLASSIC", label: "🎞️ Klassiker (<2000)" },
+      { id: "2000s", label: "💿 2000er" },
+      { id: "2010s", label: "🎬 2010er" },
+      { id: "RECENT", label: "🔥 2020+ Aktuell" }
+    ];
+
+    // Filmlänge / Runtime Options
+    const runtimeOptions = [
+      { id: "SHORT", label: "⚡ Kurze Filme (<90 Min)" },
+      { id: "MEDIUM", label: "🍿 Normal (90-120 Min)" },
+      { id: "LONG", label: "🏆 Epos (>120 Min)" }
+    ];
+
+    // Trailer Language Options
+    const trailerLangOptions = [
+      { id: "Deutsch", label: "🇩🇪 Deutsch" },
+      { id: "Englisch", label: "🇬🇧 Englisch" },
+      { id: "Original", label: "🌐 Original" }
+    ];
+
+    const countryLabels = {
+      "ALL": "Alle Länder",
+      "US": "🇺🇸 USA",
+      "DE": "🇩🇪 Deutschland",
+      "GB": "🇬🇧 UK",
+      "FR": "🇫🇷 Frankreich",
+      "JP": "🇯🇵 Japan",
+      "KR": "🇰🇷 Südkorea",
+      "IT": "🇮🇹 Italien",
+      "ES": "🇪🇸 Spanien",
+      "IN": "🇮🇳 Indien"
+    };
+
+    const tmdbGenreIds = {
+      "Sci-Fi": "878",
+      "Action": "28",
+      "Drama": "18",
+      "Krimi": "80",
+      "Animation": "16"
+    };
+
+    const selectedGenreText = document.getElementById('selectedGenreText');
+    const apiStatusBadge = document.getElementById('apiStatusBadge');
+    const movieCard = document.getElementById('movieCard');
+    const movieTitle = document.getElementById('movieTitle');
+    const movieOverview = document.getElementById('movieOverview');
+    const movieGenre = document.getElementById('movieGenre');
+    const movieRating = document.getElementById('movieRating');
+    const movieYear = document.getElementById('movieYear');
+    const moviePoster = document.getElementById('moviePoster');
+    const bgMoviePoster = document.getElementById('bgMoviePoster');
+    const bgCard = document.getElementById('bgCard');
+    const streamingBadges = document.getElementById('streamingBadges');
+    const cardProgressText = document.getElementById('cardProgressText');
+    const likeBtn = document.getElementById('likeBtn');
+    const dislikeBtn = document.getElementById('dislikeBtn');
+    const undoBtn = document.getElementById('undoBtn');
+    const infoBtn = document.getElementById('infoBtn');
+    const badgeLike = document.getElementById('badgeLike');
+    const badgeDislike = document.getElementById('badgeDislike');
+    const badgeInfo = document.getElementById('badgeInfo');
+
+    function updateApiStatusBadge() {
+      if (!apiStatusBadge) return;
+      if (tmdbApiKey) {
+        apiStatusBadge.textContent = "TMDB Live";
+        apiStatusBadge.className = "text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+      } else {
+        apiStatusBadge.textContent = "Offline Paket";
+        apiStatusBadge.className = "text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700";
+      }
+    }
+
+    function loadAppState() {
+      try {
+        const savedLikes = localStorage.getItem('ms_liked');
+        if (savedLikes) likedMovies = JSON.parse(savedLikes);
+
+        const savedDislikes = localStorage.getItem('ms_disliked');
+        if (savedDislikes) dislikedMovies = JSON.parse(savedDislikes);
+
+        const savedMediaType = localStorage.getItem('ms_mediatype_multi');
+        if (savedMediaType) currentSelectedMediaTypes = JSON.parse(savedMediaType);
+
+        const savedGenre = localStorage.getItem('ms_genre_multi');
+        if (savedGenre) currentSelectedGenres = JSON.parse(savedGenre);
+
+        const savedCountry = localStorage.getItem('ms_country_multi');
+        if (savedCountry) currentSelectedCountries = JSON.parse(savedCountry);
+
+        const savedEras = localStorage.getItem('ms_era_multi');
+        if (savedEras) currentSelectedEras = JSON.parse(savedEras);
+
+        const savedRuntimes = localStorage.getItem('ms_runtime_multi');
+        if (savedRuntimes) currentSelectedRuntimes = JSON.parse(savedRuntimes);
+
+        const savedTrailerLang = localStorage.getItem('ms_trailer_lang');
+        if (savedTrailerLang) currentTrailerLanguage = savedTrailerLang;
+
+        const savedKey = localStorage.getItem('ms_tmdb_key');
+        if (savedKey) tmdbApiKey = savedKey;
+
+        const savedIndex = localStorage.getItem('ms_index');
+        if (savedIndex) currentIndex = parseInt(savedIndex, 10) || 0;
+      } catch (e) {
+        console.warn('LocalStorage Zugriffsfehler:', e);
+      }
+    }
+
+    function saveAppState() {
+      try {
+        localStorage.setItem('ms_liked', JSON.stringify(likedMovies));
+        localStorage.setItem('ms_disliked', JSON.stringify(dislikedMovies));
+        localStorage.setItem('ms_mediatype_multi', JSON.stringify(currentSelectedMediaTypes));
+        localStorage.setItem('ms_genre_multi', JSON.stringify(currentSelectedGenres));
+        localStorage.setItem('ms_country_multi', JSON.stringify(currentSelectedCountries));
+        localStorage.setItem('ms_era_multi', JSON.stringify(currentSelectedEras));
+        localStorage.setItem('ms_runtime_multi', JSON.stringify(currentSelectedRuntimes));
+        localStorage.setItem('ms_trailer_lang', currentTrailerLanguage);
+        localStorage.setItem('ms_tmdb_key', tmdbApiKey);
+        localStorage.setItem('ms_index', currentIndex.toString());
+      } catch (e) {
+        console.warn('Fehler beim Speichern:', e);
+      }
+      updateWatchlistBadge();
+      updateApiStatusBadge();
+    }
+
+    function renderFilterChips() {
+      renderChipGroup('mediaTypeChipsContainer', 'mediaTypeCountLabel', mediaTypeOptions, currentSelectedMediaTypes, 'mediaType', 'Beide (Filme & Serien)');
+      renderChipGroup('genreChipsContainer', 'genreCountLabel', genreOptions, currentSelectedGenres, 'genre', 'Alle Genres');
+      renderChipGroup('countryChipsContainer', 'countryCountLabel', countryOptions, currentSelectedCountries, 'country', 'Alle Länder');
+      renderChipGroup('eraChipsContainer', 'eraCountLabel', eraOptions, currentSelectedEras, 'era', 'Alle Epochen');
+      renderChipGroup('runtimeChipsContainer', 'runtimeCountLabel', runtimeOptions, currentSelectedRuntimes, 'runtime', 'Alle Laufzeiten');
+      renderChipGroup('trailerLangChipsContainer', 'trailerLangLabel', trailerLangOptions, [currentTrailerLanguage], 'trailerLang', 'Deutsch');
+
+      // Re-bind click listeners for chips
+      document.querySelectorAll('.chip-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const type = btn.dataset.type;
+          const val = btn.dataset.val;
+
+          if (type === 'mediaType') currentSelectedMediaTypes = toggleChipValue(currentSelectedMediaTypes, val);
+          else if (type === 'genre') currentSelectedGenres = toggleChipValue(currentSelectedGenres, val);
+          else if (type === 'country') currentSelectedCountries = toggleChipValue(currentSelectedCountries, val);
+          else if (type === 'era') currentSelectedEras = toggleChipValue(currentSelectedEras, val);
+          else if (type === 'runtime') currentSelectedRuntimes = toggleChipValue(currentSelectedRuntimes, val);
+          else if (type === 'trailerLang') currentTrailerLanguage = val === 'ALL' ? 'Deutsch' : val;
+
+          renderFilterChips();
+        });
+      });
+    }
+
+    function toggleChipValue(array, val) {
+      if (val === 'ALL') return ['ALL'];
+      let updated = array.filter(v => v !== 'ALL');
+      if (updated.includes(val)) {
+        updated = updated.filter(v => v !== val);
+      } else {
+        updated.push(val);
+      }
+      return updated.length === 0 ? ['ALL'] : updated;
+    }
+
+    function renderChipGroup(containerId, countLabelId, options, selectedArray, type, allText) {
+      const container = document.getElementById(containerId);
+      const label = document.getElementById(countLabelId);
+      if (!container || !label) return;
+
+      let html = `
+        <button data-type="${type}" data-val="ALL" class="chip-btn px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
+          selectedArray.includes('ALL') 
+            ? 'bg-rose-600 text-white border-rose-500 shadow-md' 
+            : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+        }">
+          ${allText}
+        </button>
+      `;
+
+      options.forEach(opt => {
+        const isSelected = selectedArray.includes(opt.id);
+        html += `
+          <button data-type="${type}" data-val="${opt.id}" class="chip-btn px-3 py-1.5 rounded-xl text-xs font-semibold transition border ${
+            isSelected 
+              ? 'bg-rose-600 text-white border-rose-500 shadow-md' 
+              : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+          }">
+            ${opt.label}
+          </button>
+        `;
+      });
+      container.innerHTML = html;
+      label.textContent = selectedArray.includes('ALL') ? "Alle" : `${selectedArray.length} gewählt`;
+    }
+
+    async function fetchTmdbMovies(append = false) {
+      if (!tmdbApiKey || isLoadingMoreTmdb || isSessionMode || isGuestMode) return;
+      isLoadingMoreTmdb = true;
+
+      try {
+        let pageToFetch = append ? tmdbPage + 1 : 1;
+        
+        const fetchMovies = currentSelectedMediaTypes.includes('ALL') || currentSelectedMediaTypes.includes('movie');
+        const fetchSeries = currentSelectedMediaTypes.includes('ALL') || currentSelectedMediaTypes.includes('tv');
+
+        let fetchedItems = [];
+
+        if (fetchMovies) {
+          let movieUrl = `https://api.themoviedb.org/3/discover/movie?api_key=${tmdbApiKey}&language=de-DE&sort_by=popularity.desc&page=${pageToFetch}`;
+          if (!currentSelectedGenres.includes('ALL')) {
+            const mappedGenreIds = currentSelectedGenres.map(g => tmdbGenreIds[g]).filter(Boolean).join('|');
+            if (mappedGenreIds) movieUrl += `&with_genres=${mappedGenreIds}`;
+          }
+          if (!currentSelectedCountries.includes('ALL')) {
+            movieUrl += `&with_origin_country=${currentSelectedCountries.join('|')}`;
+          }
+          if (!currentSelectedEras.includes('ALL')) {
+            if (currentSelectedEras.includes('CLASSIC')) movieUrl += `&primary_release_date.lte=1999-12-31`;
+            if (currentSelectedEras.includes('RECENT')) movieUrl += `&primary_release_date.gte=2020-01-01`;
+          }
+
+          const res = await fetch(movieUrl);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.results) {
+              const mapped = data.results.map(m => ({
+                id: `movie_${m.id}`,
+                type: 'movie',
+                title: m.title || m.original_title,
+                year: (m.release_date || '').split('-')[0] || '2024',
+                rating: (m.vote_average || 0).toFixed(1),
+                genre: "Film Highlight",
+                country: m.origin_country && m.origin_country[0] ? m.origin_country[0] : "US",
+                runtime: "Kino Film",
+                director: "TMDB Kinofilm",
+                overview: m.overview || "Keine Beschreibung verfügbar.",
+                poster: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=800&auto=format&fit=crop",
+                providers: ["TMDB", "Kino"]
+              }));
+              fetchedItems.push(...mapped);
+            }
+          }
+        }
+
+        if (fetchSeries) {
+          let tvUrl = `https://api.themoviedb.org/3/discover/tv?api_key=${tmdbApiKey}&language=de-DE&sort_by=popularity.desc&page=${pageToFetch}`;
+          if (!currentSelectedGenres.includes('ALL')) {
+            const mappedGenreIds = currentSelectedGenres.map(g => tmdbGenreIds[g]).filter(Boolean).join('|');
+            if (mappedGenreIds) tvUrl += `&with_genres=${mappedGenreIds}`;
+          }
+          if (!currentSelectedCountries.includes('ALL')) {
+            tvUrl += `&with_origin_country=${currentSelectedCountries.join('|')}`;
+          }
+
+          const res = await fetch(tvUrl);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.results) {
+              const mapped = data.results.map(s => ({
+                id: `tv_${s.id}`,
+                type: 'tv',
+                title: s.name || s.original_name,
+                year: (s.first_air_date || '').split('-')[0] || '2024',
+                rating: (s.vote_average || 0).toFixed(1),
+                genre: "Serie Highlight",
+                country: s.origin_country && s.origin_country[0] ? s.origin_country[0] : "US",
+                runtime: "TV Serie",
+                director: "TMDB Serie",
+                overview: s.overview || "Keine Beschreibung verfügbar.",
+                poster: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=800&auto=format&fit=crop",
+                providers: ["TMDB", "Serie"]
+              }));
+              fetchedItems.push(...mapped);
+            }
+          }
+        }
+
+        // Shuffle fetched items for a nice mix of movies and series
+        fetchedItems.sort(() => Math.random() - 0.5);
+
+        if (fetchedItems.length > 0) {
+          if (append) {
+            tmdbPage = pageToFetch;
+            movieDeck = [...movieDeck, ...fetchedItems];
+          } else {
+            tmdbPage = 1;
+            currentIndex = 0;
+            movieDeck = fetchedItems;
+          }
+        } else if (!append) {
+          movieDeck = [];
+        }
+      } catch (e) {
+        console.warn('TMDB Fetch Fehler:', e);
+      } finally {
+        isLoadingMoreTmdb = false;
+      }
+    }
+
+    function filterDeck() {
+      if (isSessionMode || isGuestMode) return;
+
+      if (!tmdbApiKey) {
+        movieDeck = mockMovies.filter(m => {
+          const mediaTypeMatch = currentSelectedMediaTypes.includes('ALL') || currentSelectedMediaTypes.includes(m.type || 'movie');
+          const genreMatch = currentSelectedGenres.includes('ALL') || currentSelectedGenres.includes(m.genre);
+          const countryMatch = currentSelectedCountries.includes('ALL') || currentSelectedCountries.includes(m.country);
+          
+          let eraMatch = true;
+          const yr = parseInt(m.year, 10);
+          if (!currentSelectedEras.includes('ALL')) {
+            eraMatch = currentSelectedEras.some(era => {
+              if (era === 'CLASSIC') return yr < 2000;
+              if (era === '2000s') return yr >= 2000 && yr < 2010;
+              if (era === '2010s') return yr >= 2010 && yr < 2020;
+              if (era === 'RECENT') return yr >= 2020;
+              return true;
+            });
+          }
+
+          let runtimeMatch = true;
+          const rt = parseInt(m.runtime, 10) || 100;
+          if (!currentSelectedRuntimes.includes('ALL')) {
+            runtimeMatch = currentSelectedRuntimes.some(r => {
+              if (r === 'SHORT') return rt < 90;
+              if (r === 'MEDIUM') return rt >= 90 && rt <= 120;
+              if (r === 'LONG') return rt > 120;
+              return true;
+            });
+          }
+
+          return mediaTypeMatch && genreMatch && countryMatch && eraMatch && runtimeMatch;
+        });
+        if (currentIndex >= movieDeck.length) {
+          currentIndex = 0;
+        }
+      }
+
+      updateFilterHeaderLabel();
+    }
+
+    function updateFilterHeaderLabel() {
+      if (!selectedGenreText) return;
+      if (isSessionMode || isGuestMode) {
+        selectedGenreText.textContent = "Match-Session (15 Titel)";
+        return;
+      }
+
+      let activeFiltersCount = 0;
+      if (!currentSelectedMediaTypes.includes('ALL')) activeFiltersCount++;
+      if (!currentSelectedGenres.includes('ALL')) activeFiltersCount++;
+      if (!currentSelectedCountries.includes('ALL')) activeFiltersCount++;
+      if (!currentSelectedEras.includes('ALL')) activeFiltersCount++;
+      if (!currentSelectedRuntimes.includes('ALL')) activeFiltersCount++;
+
+      if (activeFiltersCount === 0) {
+        selectedGenreText.textContent = "Alle Filter • Filme & Serien";
+      } else {
+        selectedGenreText.textContent = `${activeFiltersCount} Filter aktiv`;
+      }
+    }
+
+    function renderCard() {
+      if (!tmdbApiKey && !isSessionMode && !isGuestMode) {
+        filterDeck();
+      } else {
+        updateFilterHeaderLabel();
+      }
+
+      movieCard.classList.remove('animating');
+      movieCard.style.transform = 'translate(0px, 0px) rotate(0deg)';
+      badgeLike.style.opacity = '0';
+      badgeDislike.style.opacity = '0';
+      badgeInfo.style.opacity = '0';
+
+      undoBtn.disabled = swipeHistory.length === 0;
+
+      if (tmdbApiKey && !isSessionMode && !isGuestMode && currentIndex >= movieDeck.length - 2 && !isLoadingMoreTmdb) {
+        fetchTmdbMovies(true).then(() => {
+          if (currentIndex < movieDeck.length) renderCard();
+        });
+      }
+
+      if (movieDeck.length === 0) {
+        renderEmptyState("Keine Titel für diese Filterkombination");
+        return;
+      }
+
+      if (currentIndex < movieDeck.length) {
+        const movie = movieDeck[currentIndex];
+        movieTitle.textContent = movie.title;
+        movieOverview.textContent = movie.overview;
+        
+        const flag = countryLabels[movie.country] ? countryLabels[movie.country].split(' ')[0] : '';
+        const typeIcon = movie.type === 'tv' ? '📺 Serie' : '🎬 Film';
+        movieGenre.textContent = `${typeIcon} • ${flag ? flag + ' ' : ''}${movie.genre}`;
+        
+        movieRating.textContent = `⭐ ${movie.rating}`;
+        movieYear.textContent = movie.year;
+        moviePoster.src = movie.poster;
+
+        let badgesHTML = (movie.providers || ['Streaming']).map(p => 
+          `<span class="px-2 py-0.5 text-[10px] font-medium bg-slate-800/90 text-slate-300 rounded border border-slate-700">${p}</span>`
+        ).join('');
+
+        if (movie.runtime) {
+          badgesHTML += `<span class="px-2 py-0.5 text-[10px] font-medium bg-rose-950/80 text-rose-300 rounded border border-rose-800/50">⏱️ ${movie.runtime}</span>`;
+        }
+
+        streamingBadges.innerHTML = badgesHTML;
+
+        if (currentIndex + 1 < movieDeck.length) {
+          const nextMovie = movieDeck[currentIndex + 1];
+          bgMoviePoster.src = nextMovie.poster;
+          bgCard.style.display = 'flex';
+        } else {
+          bgCard.style.display = 'none';
+        }
+
+        cardProgressText.textContent = `${currentIndex + 1} / ${movieDeck.length}`;
+        likeBtn.disabled = false;
+        dislikeBtn.disabled = false;
+        infoBtn.disabled = false;
+      } else {
+        if (isSessionMode || isGuestMode) {
+          openSessionEndModal();
+        } else {
+          renderEmptyState("Alle Titel geswipet!");
+        }
+      }
+    }
+
+    function renderEmptyState(message) {
+      movieTitle.textContent = message;
+      movieOverview.textContent = tmdbApiKey 
+        ? "Du hast alle geladenen Filme durchgesehen. Klicke unten, um mehr nachzuladen!"
+        : "Passt die Filter in den Einstellungen an oder füge einen TMDB Key hinzu.";
+      movieGenre.textContent = "Ende";
+      movieRating.textContent = "⭐ -";
+      movieYear.textContent = "";
+      moviePoster.src = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=800&auto=format&fit=crop";
+      
+      if (tmdbApiKey && !isSessionMode && !isGuestMode) {
+        streamingBadges.innerHTML = `
+          <button id="loadMoreTmdbBtn" class="w-full py-2 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-lg">
+            ↻ Nächste Filme von TMDB laden (Seite ${tmdbPage + 1})
+          </button>
+        `;
+        setTimeout(() => {
+          const btn = document.getElementById('loadMoreTmdbBtn');
+          if (btn) {
+            btn.addEventListener('click', async () => {
+              btn.textContent = "Lade neue Filme...";
+              await fetchTmdbMovies(true);
+              renderCard();
+            });
+          }
+        }, 50);
+      } else {
+        streamingBadges.innerHTML = "";
+      }
+
+      bgCard.style.display = 'none';
+      cardProgressText.textContent = `${movieDeck.length} / ${movieDeck.length}`;
+      likeBtn.disabled = true;
+      dislikeBtn.disabled = true;
+      infoBtn.disabled = true;
+    }
+
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let currentX = 0;
+    let currentY = 0;
+    const swipeThreshold = 90;
+
+    movieCard.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+
+    function onPointerDown(e) {
+      if (currentIndex >= movieDeck.length) return;
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      if (movieCard.setPointerCapture) {
+        try { movieCard.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+      movieCard.classList.remove('animating');
+    }
+
+    function onPointerMove(e) {
+      if (!isDragging) return;
+
+      currentX = e.clientX - startX;
+      currentY = e.clientY - startY;
+
+      if (currentY < -25 && Math.abs(currentY) > Math.abs(currentX) * 1.1) {
+        const translateY = Math.max(currentY, -120);
+        movieCard.style.transform = `translate(0px, ${translateY}px) rotate(0deg)`;
+        badgeInfo.style.opacity = Math.min(Math.abs(currentY) / swipeThreshold, 1).toString();
+        badgeLike.style.opacity = '0';
+        badgeDislike.style.opacity = '0';
+      } else {
+        const rotation = currentX * 0.07;
+        movieCard.style.transform = `translate(${currentX}px, ${currentY}px) rotate(${rotation}deg)`;
+        badgeInfo.style.opacity = '0';
+
+        if (currentX > 0) {
+          badgeLike.style.opacity = Math.min(currentX / swipeThreshold, 1).toString();
+          badgeDislike.style.opacity = '0';
+        } else {
+          badgeDislike.style.opacity = Math.min(Math.abs(currentX) / swipeThreshold, 1).toString();
+          badgeLike.style.opacity = '0';
+        }
+      }
+    }
+
+    function onPointerUp(e) {
+      if (!isDragging) return;
+      isDragging = false;
+
+      if (e && e.pointerId && movieCard.releasePointerCapture) {
+        try { movieCard.releasePointerCapture(e.pointerId); } catch (err) {}
+      }
+
+      movieCard.classList.add('animating');
+
+      if (currentY < -swipeThreshold && Math.abs(currentY) > Math.abs(currentX)) {
+        movieCard.style.transform = 'translate(0px, 0px) rotate(0deg)';
+        badgeLike.style.opacity = '0';
+        badgeDislike.style.opacity = '0';
+        badgeInfo.style.opacity = '0';
+        if (currentIndex < movieDeck.length) {
+          openDetailModal(movieDeck[currentIndex]);
+        }
+      } else if (currentX > swipeThreshold) {
+        handleSwipe('right');
+      } else if (currentX < -swipeThreshold) {
+        handleSwipe('left');
+      } else {
+        movieCard.style.transform = 'translate(0px, 0px) rotate(0deg)';
+        badgeLike.style.opacity = '0';
+        badgeDislike.style.opacity = '0';
+        badgeInfo.style.opacity = '0';
+      }
+
+      currentX = 0;
+      currentY = 0;
+    }
+
+    function handleSwipe(direction) {
+      if (currentIndex >= movieDeck.length) return;
+
+      const movie = movieDeck[currentIndex];
+      swipeHistory.push({ movie, index: currentIndex, direction });
+
+      if (direction === 'right') {
+        badgeLike.style.opacity = '1';
+        if (!likedMovies.some(m => m.id === movie.id)) {
+          likedMovies.push(movie);
+        }
+        if (isSessionMode || isGuestMode) sessionBitmask.push('1');
+      } else {
+        badgeDislike.style.opacity = '1';
+        if (!dislikedMovies.some(m => m.id === movie.id)) {
+          dislikedMovies.push(movie);
+        }
+        if (isSessionMode || isGuestMode) sessionBitmask.push('0');
+      }
+
+      movieCard.classList.add('animating');
+      const targetX = direction === 'right' ? window.innerWidth * 1.2 : -window.innerWidth * 1.2;
+      const targetRotation = direction === 'right' ? 25 : -25;
+
+      movieCard.style.transform = `translate(${targetX}px, ${currentY}px) rotate(${targetRotation}deg)`;
+
+      setTimeout(() => {
+        currentIndex++;
+        saveAppState();
+        renderCard();
+      }, 250);
+    }
+
+    function undoSwipe() {
+      if (swipeHistory.length === 0) return;
+      const lastAction = swipeHistory.pop();
+
+      if (lastAction.direction === 'right') {
+        likedMovies = likedMovies.filter(m => m.id !== lastAction.movie.id);
+      } else {
+        dislikedMovies = dislikedMovies.filter(m => m.id !== lastAction.movie.id);
+      }
+
+      if ((isSessionMode || isGuestMode) && sessionBitmask.length > 0) {
+        sessionBitmask.pop();
+      }
+
+      currentIndex = lastAction.index;
+      saveAppState();
+      renderCard();
+    }
+
+    const watchlistModal = document.getElementById('watchlistModal');
+    const watchlistBtn = document.getElementById('watchlistBtn');
+    const closeWatchlistBtn = document.getElementById('closeWatchlistBtn');
+    const watchlistContent = document.getElementById('watchlistContent');
+    const watchlistCount = document.getElementById('watchlistCount');
+    const watchlistBadge = document.getElementById('watchlistBadge');
+    const clearWatchlistBtn = document.getElementById('clearWatchlistBtn');
+
+    function updateWatchlistBadge() {
+      const count = likedMovies.length;
+      watchlistCount.textContent = count.toString();
+      if (count > 0) {
+        watchlistBadge.textContent = count > 99 ? '99+' : count.toString();
+        watchlistBadge.classList.remove('hidden');
+      } else {
+        watchlistBadge.classList.add('hidden');
+      }
+    }
+
+    function openWatchlist() {
+      watchlistContent.innerHTML = '';
+      if (likedMovies.length === 0) {
+        watchlistContent.innerHTML = `
+          <div class="text-center py-12 text-slate-500 space-y-2">
+            <span class="text-4xl block">🎬</span>
+            <p class="font-medium">Noch keine Filme in deiner Watchlist.</p>
+            <p class="text-xs">Swipe nach rechts (LIKE), um Filme hier zu speichern!</p>
+          </div>
+        `;
+      } else {
+        likedMovies.forEach(movie => {
+          const item = document.createElement('div');
+          item.className = 'flex items-center justify-between gap-3 p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/60 hover:bg-slate-800 transition cursor-pointer';
+          item.innerHTML = `
+            <img src="${movie.poster}" alt="${movie.title}" class="w-12 h-16 object-cover rounded-lg shrink-0">
+            <div class="flex-1 min-w-0">
+              <h4 class="font-bold text-white text-sm truncate">${movie.title}</h4>
+              <p class="text-xs text-slate-400">${movie.genre} • ${movie.year}</p>
+              <div class="flex items-center gap-1 mt-1">
+                <span class="text-[10px] text-amber-400 font-bold">⭐ ${movie.rating}</span>
+              </div>
+            </div>
+            <button class="remove-like-btn p-2 text-rose-400 hover:bg-rose-500/20 rounded-lg text-sm" data-id="${movie.id}">✕</button>
+          `;
+          item.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('remove-like-btn')) {
+              openDetailModal(movie);
+            }
+          });
+          watchlistContent.appendChild(item);
+        });
+
+        document.querySelectorAll('.remove-like-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = parseInt(btn.dataset.id, 10);
+            likedMovies = likedMovies.filter(m => m.id !== id);
+            saveAppState();
+            openWatchlist();
+          });
+        });
+      }
+
+      watchlistModal.classList.remove('hidden');
+      setTimeout(() => watchlistModal.classList.remove('opacity-0'), 10);
+    }
+
+    function closeWatchlist() {
+      watchlistModal.classList.add('opacity-0');
+      setTimeout(() => watchlistModal.classList.add('hidden'), 300);
+    }
+
+    watchlistBtn.addEventListener('click', openWatchlist);
+    closeWatchlistBtn.addEventListener('click', closeWatchlist);
+    clearWatchlistBtn.addEventListener('click', () => {
+      likedMovies = [];
+      saveAppState();
+      openWatchlist();
+    });
+
+    const detailModal = document.getElementById('detailModal');
+    const detailCard = document.getElementById('detailCard');
+    const closeDetailBtn = document.getElementById('closeDetailBtn');
+    const detailPoster = document.getElementById('detailPoster');
+    const detailTitle = document.getElementById('detailTitle');
+    const detailGenre = document.getElementById('detailGenre');
+    const detailRating = document.getElementById('detailRating');
+    const detailOverview = document.getElementById('detailOverview');
+    const detailYear = document.getElementById('detailYear');
+    const detailDirector = document.getElementById('detailDirector');
+    const detailProviders = document.getElementById('detailProviders');
+    const trailerLink = document.getElementById('trailerLink');
+    const rottenTomatoesLink = document.getElementById('rottenTomatoesLink');
+    const detailSwipeBadge = document.getElementById('detailSwipeBadge');
+    const detailScrollBody = document.getElementById('detailScrollBody');
+
+    function syncDetailMovieIndex(movie) {
+      if (!movie) return;
+      const idx = movieDeck.findIndex(m => m.id === movie.id);
+      if (idx !== -1) {
+        currentIndex = idx;
+      }
+    }
+
+    function populateDetailContent(movie) {
+      if (!movie) return;
+      currentDetailMovie = movie;
+      syncDetailMovieIndex(movie);
+
+      detailPoster.src = movie.poster;
+      detailTitle.textContent = movie.title;
+      
+      const typeLabel = movie.type === 'tv' ? '📺 TV Serie' : '🎬 Film';
+      detailGenre.textContent = `${typeLabel} • ${movie.genre}`;
+      detailRating.textContent = `⭐ ${movie.rating}`;
+      detailOverview.textContent = movie.overview;
+      detailYear.textContent = movie.year;
+      detailDirector.textContent = `${movie.runtime ? movie.runtime + ' • ' : ''}${movie.director || 'Unbekannt'}`;
+      
+      detailProviders.innerHTML = (movie.providers || ['Kino', 'Streaming']).map(p =>
+        `<span class="px-2.5 py-1 text-xs font-semibold bg-slate-800 text-rose-300 rounded-lg border border-slate-700 flex items-center gap-1">📺 ${p}</span>`
+      ).join('');
+
+      // Reset Embedded Trailer Player
+      const trailerEmbedContainer = document.getElementById('trailerEmbedContainer');
+      if (trailerEmbedContainer) {
+        trailerEmbedContainer.innerHTML = '';
+        trailerEmbedContainer.classList.add('hidden');
+      }
+
+      // Search URL fallback with preferred trailer language
+      const langSearchTerm = currentTrailerLanguage === 'Original' ? 'Official Trailer' : `Trailer ${currentTrailerLanguage}`;
+      const typeWord = movie.type === 'tv' ? 'Serie' : 'Film';
+      trailerLink.href = `https://www.youtube.com/results?search_query=${encodeURIComponent(movie.title + ' ' + typeWord + ' ' + langSearchTerm)}`;
+      rottenTomatoesLink.href = `https://www.rottentomatoes.com/search?search=${encodeURIComponent(movie.title)}`;
+
+      // Live Fetch dynamic DE streaming providers & YouTube Trailer Embed from TMDB
+      if (tmdbApiKey && movie.id && (String(movie.id).startsWith('movie_') || String(movie.id).startsWith('tv_'))) {
+        const isTv = String(movie.id).startsWith('tv_');
+        const realId = String(movie.id).replace('movie_', '').replace('tv_', '');
+        const endpoint = isTv ? 'tv' : 'movie';
+        
+        detailProviders.innerHTML = '<span class="text-xs text-slate-400 animate-pulse">Lade Live Streaming-Anbieter (DE)...</span>';
+        
+        // 1. Fetch Watch Providers
+        fetch(`https://api.themoviedb.org/3/${endpoint}/${realId}/watch/providers?api_key=${tmdbApiKey}`)
+          .then(res => res.json())
+          .then(data => {
+            const deProviders = data.results && data.results.DE;
+            let providersList = [];
+            if (deProviders) {
+              if (deProviders.flatrate) {
+                providersList.push(...deProviders.flatrate.map(p => p.provider_name));
+              } else if (deProviders.rent || deProviders.buy) {
+                providersList.push('Leihen/Kaufen');
+              }
+            }
+            if (providersList.length > 0) {
+              movie.providers = [...new Set(providersList)];
+              detailProviders.innerHTML = movie.providers.map(p =>
+                `<span class="px-2.5 py-1 text-xs font-semibold bg-slate-800 text-rose-300 rounded-lg border border-slate-700 flex items-center gap-1">📺 ${p}</span>`
+              ).join('');
+            } else {
+              detailProviders.innerHTML = '<span class="text-xs text-slate-400">Aktuell kein Flatrate-Streaming in DE</span>';
+            }
+          })
+          .catch(() => {
+            detailProviders.innerHTML = '<span class="text-xs text-slate-400">Streaming-Anbieter derzeit nicht abrufbar</span>';
+          });
+
+        // 2. Fetch YouTube Trailer Video Key
+        const tmdbLang = currentTrailerLanguage === 'Englisch' ? 'en-US' : 'de-DE';
+        fetch(`https://api.themoviedb.org/3/${endpoint}/${realId}/videos?api_key=${tmdbApiKey}&language=${tmdbLang}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.results && data.results.length > 0) {
+              const trailerObj = data.results.find(v => v.site === 'YouTube' && v.type === 'Trailer') || data.results.find(v => v.site === 'YouTube');
+              if (trailerObj && trailerEmbedContainer) {
+                trailerEmbedContainer.innerHTML = `
+                  <iframe class="w-full h-full" src="https://www.youtube-nocookie.com/embed/${trailerObj.key}" title="YouTube Trailer" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                `;
+                trailerEmbedContainer.classList.remove('hidden');
+              }
+            }
+          })
+          .catch(e => console.warn('TMDB Video Fetch Fehler:', e));
+      }
+    }
+
+    function openDetailModal(movie) {
+      if (!movie) return;
+      populateDetailContent(movie);
+
+      detailCard.style.transition = 'none';
+      detailCard.style.transform = 'translate(0px, 0px) rotate(0deg)';
+      detailSwipeBadge.style.opacity = '0';
+      detailModal.style.opacity = '0';
+      detailModal.classList.remove('hidden');
+      setTimeout(() => {
+        detailModal.style.transition = 'opacity 0.25s ease';
+        detailModal.style.opacity = '1';
+      }, 10);
+    }
+
+    function closeDetailModal() {
+      detailModal.style.transition = 'opacity 0.25s ease';
+      detailCard.style.transition = 'transform 0.25s ease';
+      detailModal.style.opacity = '0';
+      detailCard.style.transform = 'translateY(100vh)';
+      setTimeout(() => {
+        detailModal.classList.add('hidden');
+        detailCard.style.transform = 'translate(0px, 0px) rotate(0deg)';
+        detailSwipeBadge.style.opacity = '0';
+      }, 250);
+    }
+
+    closeDetailBtn.addEventListener('click', closeDetailModal);
+
+    let detailStartX = 0;
+    let detailStartY = 0;
+    let detailCurrentX = 0;
+    let detailCurrentY = 0;
+    let isDetailDragging = false;
+    let detailDragDirection = null;
+    let isMouseDownOnDetail = false;
+
+    detailCard.addEventListener('touchstart', onDetailTouchStart, { passive: true });
+    detailCard.addEventListener('touchmove', onDetailTouchMove, { passive: false });
+    detailCard.addEventListener('touchend', onDetailTouchEnd);
+    detailCard.addEventListener('touchcancel', onDetailTouchEnd);
+
+    detailCard.addEventListener('mousedown', onDetailMouseDown);
+    window.addEventListener('mousemove', onDetailMouseMove);
+    window.addEventListener('mouseup', onDetailMouseUp);
+
+    function shouldIgnoreDetailGesture(target) {
+      return target && target.closest('button, a, select, input, .remove-like-btn');
+    }
+
+    function onDetailTouchStart(e) {
+      if (!e.touches || e.touches.length === 0) return;
+      if (shouldIgnoreDetailGesture(e.target)) return;
+
+      const touch = e.touches[0];
+      detailStartX = touch.clientX;
+      detailStartY = touch.clientY;
+      detailCurrentX = 0;
+      detailCurrentY = 0;
+      detailDragDirection = null;
+      isDetailDragging = false;
+      detailCard.style.transition = 'none';
+    }
+
+    function onDetailTouchMove(e) {
+      if (!e.touches || e.touches.length === 0) return;
+      
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - detailStartX;
+      const deltaY = touch.clientY - detailStartY;
+      const scrollTop = detailScrollBody ? detailScrollBody.scrollTop : 0;
+
+      if (!detailDragDirection) {
+        if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 8) {
+          detailDragDirection = 'horizontal';
+          isDetailDragging = true;
+        } else if (deltaY > 8 && scrollTop <= 2) {
+          detailDragDirection = 'vertical';
+          isDetailDragging = true;
+        }
+      }
+
+      if (isDetailDragging) {
+        if (e.cancelable) e.preventDefault();
+
+        if (detailDragDirection === 'vertical') {
+          detailCurrentY = Math.max(0, deltaY);
+          detailCard.style.transform = `translate(0px, ${detailCurrentY}px)`;
+          const progress = Math.min(detailCurrentY / 250, 1);
+          detailModal.style.opacity = (1 - progress * 0.7).toString();
+
+          detailSwipeBadge.textContent = "↓ SCHLIESSEN";
+          detailSwipeBadge.className = "absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider backdrop-blur-md shadow-xl border bg-slate-900/90 text-slate-200 border-slate-700";
+          detailSwipeBadge.style.opacity = Math.min(detailCurrentY / 40, 1).toString();
+        } else if (detailDragDirection === 'horizontal') {
+          detailCurrentX = deltaX;
+          const rotation = deltaX * 0.05;
+          detailCard.style.transform = `translate(${deltaX}px, 0px) rotate(${rotation}deg)`;
+
+          if (deltaX > 0) {
+            detailSwipeBadge.textContent = "♥ LIKE";
+            detailSwipeBadge.className = "absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider backdrop-blur-md shadow-xl border bg-emerald-950/90 text-emerald-400 border-emerald-500/50";
+            detailSwipeBadge.style.opacity = Math.min(deltaX / 50, 1).toString();
+          } else {
+            detailSwipeBadge.textContent = "✕ NOPE";
+            detailSwipeBadge.className = "absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider backdrop-blur-md shadow-xl border bg-rose-950/90 text-rose-400 border-rose-500/50";
+            detailSwipeBadge.style.opacity = Math.min(Math.abs(deltaX) / 50, 1).toString();
+          }
+        }
+      }
+    }
+
+    function onDetailTouchEnd() {
+      if (!isDetailDragging && !detailDragDirection) return;
+
+      detailCard.style.transition = 'transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+      detailModal.style.transition = 'opacity 0.25s ease';
+
+      if (detailDragDirection === 'vertical' && detailCurrentY > 80) {
+        closeDetailModal();
+      } else if (detailDragDirection === 'horizontal' && Math.abs(detailCurrentX) > 70) {
+        const direction = detailCurrentX > 0 ? 'right' : 'left';
+
+        if (currentIndex < movieDeck.length) {
+          const movie = movieDeck[currentIndex];
+          swipeHistory.push({ movie, index: currentIndex, direction });
+
+          if (direction === 'right') {
+            if (!likedMovies.some(m => m.id === movie.id)) {
+              likedMovies.push(movie);
+            }
+            if (isSessionMode || isGuestMode) sessionBitmask.push('1');
+          } else {
+            if (!dislikedMovies.some(m => m.id === movie.id)) {
+              dislikedMovies.push(movie);
+            }
+            if (isSessionMode || isGuestMode) sessionBitmask.push('0');
+          }
+
+          currentIndex++;
+          saveAppState();
+          renderCard();
+
+          if (currentIndex < movieDeck.length) {
+            populateDetailContent(movieDeck[currentIndex]);
+          } else {
+            closeDetailModal();
+          }
+        } else {
+          closeDetailModal();
+        }
+
+        detailCard.style.transform = 'translate(0px, 0px) rotate(0deg)';
+        detailModal.style.opacity = '1';
+        detailSwipeBadge.style.opacity = '0';
+      } else {
+        detailCard.style.transform = 'translate(0px, 0px) rotate(0deg)';
+        detailModal.style.opacity = '1';
+        detailSwipeBadge.style.opacity = '0';
+      }
+
+      isDetailDragging = false;
+      detailCurrentX = 0;
+      detailCurrentY = 0;
+      detailDragDirection = null;
+    }
+
+    function onDetailMouseDown(e) {
+      if (shouldIgnoreDetailGesture(e.target)) return;
+      isMouseDownOnDetail = true;
+      detailStartX = e.clientX;
+      detailStartY = e.clientY;
+      detailCurrentX = 0;
+      detailCurrentY = 0;
+      detailDragDirection = null;
+      isDetailDragging = false;
+      detailCard.style.transition = 'none';
+    }
+
+    function onDetailMouseMove(e) {
+      if (!isMouseDownOnDetail) return;
+
+      const deltaX = e.clientX - detailStartX;
+      const deltaY = e.clientY - detailStartY;
+      const scrollTop = detailScrollBody ? detailScrollBody.scrollTop : 0;
+
+      if (!detailDragDirection) {
+        if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 8) {
+          detailDragDirection = 'horizontal';
+          isDetailDragging = true;
+        } else if (deltaY > 8 && scrollTop <= 2) {
+          detailDragDirection = 'vertical';
+          isDetailDragging = true;
+        }
+      }
+
+      if (isDetailDragging) {
+        if (detailDragDirection === 'vertical') {
+          detailCurrentY = Math.max(0, deltaY);
+          detailCard.style.transform = `translate(0px, ${detailCurrentY}px)`;
+          const progress = Math.min(detailCurrentY / 250, 1);
+          detailModal.style.opacity = (1 - progress * 0.7).toString();
+
+          detailSwipeBadge.textContent = "↓ SCHLIESSEN";
+          detailSwipeBadge.className = "absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider backdrop-blur-md shadow-xl border bg-slate-900/90 text-slate-200 border-slate-700";
+          detailSwipeBadge.style.opacity = Math.min(detailCurrentY / 40, 1).toString();
+        } else if (detailDragDirection === 'horizontal') {
+          detailCurrentX = deltaX;
+          const rotation = deltaX * 0.05;
+          detailCard.style.transform = `translate(${deltaX}px, 0px) rotate(${rotation}deg)`;
+
+          if (deltaX > 0) {
+            detailSwipeBadge.textContent = "♥ LIKE";
+            detailSwipeBadge.className = "absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider backdrop-blur-md shadow-xl border bg-emerald-950/90 text-emerald-400 border-emerald-500/50";
+            detailSwipeBadge.style.opacity = Math.min(deltaX / 50, 1).toString();
+          } else {
+            detailSwipeBadge.textContent = "✕ NOPE";
+            detailSwipeBadge.className = "absolute top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider backdrop-blur-md shadow-xl border bg-rose-950/90 text-rose-400 border-rose-500/50";
+            detailSwipeBadge.style.opacity = Math.min(Math.abs(deltaX) / 50, 1).toString();
+          }
+        }
+      }
+    }
+
+    function onDetailMouseUp() {
+      if (isMouseDownOnDetail) {
+        isMouseDownOnDetail = false;
+        onDetailTouchEnd();
+      }
+    }
+
+    const settingsModal = document.getElementById('settingsModal');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+    const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+    const tmdbApiKeyInput = document.getElementById('tmdbApiKeyInput');
+    const resetProgressBtn = document.getElementById('resetProgressBtn');
+    const keyStatusText = document.getElementById('keyStatusText');
+    const shareKeyBtn = document.getElementById('shareKeyBtn');
+    const shareStatusMsg = document.getElementById('shareStatusMsg');
+    const startMatchSessionBtn = document.getElementById('startMatchSessionBtn');
+
+    function checkUrlHashForKeyAndSession() {
+      try {
+        const hash = window.location.hash;
+
+        // 1. Check for Guest Session Hash (#s=...)
+        if (hash && hash.includes('s=')) {
+          const match = hash.match(/s=([^&]+)/);
+          if (match && match[1]) {
+            const rawPayload = decodeURIComponent(match[1]);
+            try {
+              const decodedJson = JSON.parse(atob(rawPayload));
+              if (decodedJson && decodedJson.i && Array.isArray(decodedJson.i)) {
+                setupGuestSessionMode(decodedJson);
+                return;
+              }
+            } catch (err) {
+              console.warn('Session JSON Dekodierungsfehler:', err);
+            }
+          }
+        }
+
+        // 2. Check for Standalone API Key Hash (#key=...)
+        if (hash && hash.includes('key=')) {
+          const match = hash.match(/key=([^&]+)/);
+          if (match && match[1]) {
+            const extractedKey = decodeURIComponent(match[1]);
+            if (extractedKey) {
+              tmdbApiKey = extractedKey;
+              localStorage.setItem('ms_tmdb_key', tmdbApiKey);
+              if (window.history && window.history.replaceState) {
+                window.history.replaceState(null, '', window.location.pathname + window.location.search);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Fehler beim Auslesen des Hash-Keys:', e);
+      }
+    }
+
+    function setupGuestSessionMode(payload) {
+      isGuestMode = true;
+      isSessionMode = false;
+      sessionHostName = payload.h || "Host";
+      sessionMovieIds = payload.i || [];
+      sessionBitmask = [];
+
+      if (payload.k) {
+        tmdbApiKey = payload.k;
+        localStorage.setItem('ms_tmdb_key', tmdbApiKey);
+      }
+
+      // Hide non-session UI toggles
+      if (settingsBtn) settingsBtn.style.display = 'none';
+      if (watchlistBtn) watchlistBtn.style.display = 'none';
+
+      const matchBanner = document.getElementById('matchBanner');
+      const matchHostName = document.getElementById('matchHostName');
+      if (matchBanner && matchHostName) {
+        matchHostName.textContent = sessionHostName;
+        matchBanner.classList.remove('hidden');
+      }
+
+      // Load specific 15 movies directly
+      loadSpecificSessionMovies(sessionMovieIds);
+    }
+
+    async function loadSpecificSessionMovies(idArray) {
+      if (!idArray || idArray.length === 0) return;
+      
+      movieTitle.textContent = "Lade Match-Session...";
+      movieOverview.textContent = "Hole die 15 gewählten Titel von TMDB...";
+
+      try {
+        const promises = idArray.map(async (rawId) => {
+          const isTv = String(rawId).startsWith('t') || String(rawId).startsWith('tv_');
+          const cleanId = String(rawId).replace(/^[mt_]+/, '');
+          
+          if (tmdbApiKey) {
+            const endpoint = isTv ? 'tv' : 'movie';
+            const url = `https://api.themoviedb.org/3/${endpoint}/${cleanId}?api_key=${tmdbApiKey}&language=de-DE`;
+            const res = await fetch(url);
+            if (res.ok) {
+              const data = await res.json();
+              return {
+                id: `${isTv ? 'tv' : 'movie'}_${data.id}`,
+                type: isTv ? 'tv' : 'movie',
+                title: data.title || data.name || data.original_title,
+                year: (data.release_date || data.first_air_date || '').split('-')[0] || '2024',
+                rating: (data.vote_average || 0).toFixed(1),
+                genre: isTv ? "Serie Highlight" : "Film Highlight",
+                country: data.origin_country && data.origin_country[0] ? data.origin_country[0] : "US",
+                runtime: isTv ? "TV Serie" : `${data.runtime || 100} Min`,
+                director: isTv ? "TMDB Serie" : "TMDB Kinofilm",
+                overview: data.overview || "Keine Beschreibung verfügbar.",
+                poster: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=800&auto=format&fit=crop",
+                providers: ["TMDB"]
+              };
+            }
+          }
+
+          // Fallback to offline mock items matching or placeholder
+          const foundMock = mockMovies.find(m => String(m.id) === String(rawId) || String(m.id).includes(cleanId));
+          if (foundMock) return foundMock;
+
+          return {
+            id: rawId,
+            type: isTv ? 'tv' : 'movie',
+            title: `Titel #${cleanId}`,
+            year: "2024",
+            rating: "8.0",
+            genre: "Highlight",
+            country: "US",
+            runtime: "Film",
+            director: "Unbekannt",
+            overview: "Beschreibung derzeit nicht verfügbar.",
+            poster: "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=800&auto=format&fit=crop",
+            providers: ["Streaming"]
+          };
+        });
+
+        const resolvedMovies = await Promise.all(promises);
+        movieDeck = resolvedMovies.filter(Boolean);
+        currentIndex = 0;
+        swipeHistory = [];
+        renderCard();
+      } catch (e) {
+        console.warn('Fehler beim Laden der Session-Filme:', e);
+      }
+    }
+
+    function startHostMatchSession() {
+      if (movieDeck.length < 15 && tmdbApiKey) {
+        // Fetch fresh movies if deck is short
+        fetchTmdbMovies(false).then(() => initiateHostSessionDeck());
+      } else {
+        initiateHostSessionDeck();
+      }
+    }
+
+    function initiateHostSessionDeck() {
+      let pool = [...movieDeck];
+      if (pool.length < 15) {
+        pool = [...mockMovies, ...mockMovies, ...mockMovies].slice(0, 15);
+      } else {
+        pool = pool.slice(0, 15);
+      }
+
+      isSessionMode = true;
+      isGuestMode = false;
+      movieDeck = pool;
+      currentIndex = 0;
+      sessionBitmask = [];
+      sessionMovieIds = movieDeck.map(m => m.id);
+
+      closeSettingsModal();
+      renderCard();
+    }
+
+    const sessionEndModal = document.getElementById('sessionEndModal');
+    const sessionEndTitle = document.getElementById('sessionEndTitle');
+    const sessionEndSubtitle = document.getElementById('sessionEndSubtitle');
+    const hostShareSection = document.getElementById('hostShareSection');
+    const guestCodeSection = document.getElementById('guestCodeSection');
+    const hostNameInput = document.getElementById('hostNameInput');
+    const guestNameInput = document.getElementById('guestNameInput');
+    const generateSessionLinkBtn = document.getElementById('generateSessionLinkBtn');
+    const copyMatchCodeBtn = document.getElementById('copyMatchCodeBtn');
+    const hostShareCopyMsg = document.getElementById('hostShareCopyMsg');
+    const guestCopyMsg = document.getElementById('guestCopyMsg');
+    const closeSessionEndBtn = document.getElementById('closeSessionEndBtn');
+
+    function openSessionEndModal() {
+      if (isGuestMode) {
+        sessionEndTitle.textContent = "Session abgeschlossen!";
+        sessionEndSubtitle.textContent = `Du hast alle 15 Filme von ${sessionHostName} bewertet.`;
+        hostShareSection.classList.add('hidden');
+        guestCodeSection.classList.remove('hidden');
+      } else {
+        sessionEndTitle.textContent = "Match-Session erstellt!";
+        sessionEndSubtitle.textContent = "Du hast deine 15 Titel bewertet. Erstelle jetzt den Einladungslink!";
+        guestCodeSection.classList.add('hidden');
+        hostShareSection.classList.remove('hidden');
+      }
+
+      sessionEndModal.classList.remove('hidden');
+      setTimeout(() => sessionEndModal.classList.remove('opacity-0'), 10);
+    }
+
+    function generateHostSessionLink() {
+      const name = hostNameInput.value.trim() || "Host";
+      sessionHostName = name;
+
+      const bitmaskString = sessionBitmask.join('');
+      const payload = {
+        k: tmdbApiKey || '',
+        f: { media: currentSelectedMediaTypes, genre: currentSelectedGenres },
+        i: sessionMovieIds,
+        h: name,
+        p: bitmaskString
+      };
+
+      const jsonStr = JSON.stringify(payload);
+      const base64Str = btoa(jsonStr);
+
+      const baseUrl = window.location.protocol + '//' + window.location.host + window.location.pathname;
+      const shareUrl = `${baseUrl}#s=${encodeURIComponent(base64Str)}`;
+
+      copyTextToClipboard(shareUrl, hostShareCopyMsg);
+
+      // Save Host state locally for Evaluation
+      localStorage.setItem('wn_last_host_payload', JSON.stringify({
+        hostName: name,
+        movieIds: sessionMovieIds,
+        bitmask: bitmaskString,
+        deck: movieDeck
+      }));
+    }
+
+    function copyGuestMatchCode() {
+      const name = guestNameInput.value.trim() || "Gast";
+      const bitmaskString = sessionBitmask.join('');
+      const matchCode = `WN:${name}:${bitmaskString}`;
+
+      copyTextToClipboard(matchCode, guestCopyMsg);
+    }
+
+    function copyTextToClipboard(text, msgElement) {
+      const tempTextArea = document.createElement('textarea');
+      tempTextArea.value = text;
+      tempTextArea.style.position = 'fixed';
+      tempTextArea.style.opacity = '0';
+      document.body.appendChild(tempTextArea);
+      tempTextArea.select();
+
+      try {
+        document.execCommand('copy');
+        if (msgElement) {
+          msgElement.classList.remove('hidden');
+          setTimeout(() => msgElement.classList.add('hidden'), 4000);
+        }
+      } catch (err) {
+        console.warn('Fehler beim Kopieren:', err);
+      } finally {
+        document.body.removeChild(tempTextArea);
+      }
+    }
+
+    closeSessionEndBtn.addEventListener('click', () => {
+      sessionEndModal.classList.add('opacity-0');
+      setTimeout(() => sessionEndModal.classList.add('hidden'), 300);
+    });
+
+    if (generateSessionLinkBtn) generateSessionLinkBtn.addEventListener('click', generateHostSessionLink);
+    if (copyMatchCodeBtn) copyMatchCodeBtn.addEventListener('click', copyGuestMatchCode);
+    if (startMatchSessionBtn) startMatchSessionBtn.addEventListener('click', startHostMatchSession);
+
+    // --- Evaluation Center Modal ---
+    const matchResultsModal = document.getElementById('matchResultsModal');
+    const matchResultsBtn = document.getElementById('matchResultsBtn');
+    const closeMatchResultsBtn = document.getElementById('closeMatchResultsBtn');
+    const calculateMatchesBtn = document.getElementById('calculateMatchesBtn');
+    const matchCodesInput = document.getElementById('matchCodesInput');
+    const matchesResultsList = document.getElementById('matchesResultsList');
+
+    function openMatchResultsModal() {
+      matchResultsModal.classList.remove('hidden');
+      setTimeout(() => matchResultsModal.classList.remove('opacity-0'), 10);
+    }
+
+    function closeMatchResultsModal() {
+      matchResultsModal.classList.add('opacity-0');
+      setTimeout(() => matchResultsModal.classList.add('hidden'), 300);
+    }
+
+    function calculateMatches() {
+      const inputText = matchCodesInput.value.trim();
+      const lastHostDataRaw = localStorage.getItem('wn_last_host_payload');
+      
+      let hostName = "Host";
+      let hostBitmask = "111111111111111"; // Default fallback
+      let currentSessionDeck = movieDeck.slice(0, 15);
+
+      if (lastHostDataRaw) {
+        try {
+          const parsedHost = JSON.parse(lastHostDataRaw);
+          hostName = parsedHost.hostName || "Host";
+          hostBitmask = parsedHost.bitmask || hostBitmask;
+          if (parsedHost.deck && parsedHost.deck.length > 0) {
+            currentSessionDeck = parsedHost.deck;
+          }
+        } catch (e) {}
+      }
+
+      const guestEntries = [];
+      const lines = inputText.split('\n');
+      
+      lines.forEach(line => {
+        const match = line.match(/WN:([^:]+):([01]{15})/i);
+        if (match) {
+          guestEntries.push({
+            name: match[1].trim(),
+            bitmask: match[2]
+          });
+        }
+      });
+
+      // Aggregate scores per movie
+      const results = currentSessionDeck.map((movie, index) => {
+        let score = 0;
+        const likedBy = [];
+
+        // Check Host
+        if (hostBitmask[index] === '1') {
+          score++;
+          likedBy.push(hostName);
+        }
+
+        // Check Guests
+        guestEntries.forEach(guest => {
+          if (guest.bitmask[index] === '1') {
+            score++;
+            likedBy.push(guest.name);
+          }
+        });
+
+        return { movie, score, likedBy };
+      });
+
+      // Sort descending by score
+      results.sort((a, b) => b.score - a.score);
+
+      // Render results
+      matchesResultsList.innerHTML = '';
+      if (results.length === 0) {
+        matchesResultsList.innerHTML = `<p class="text-xs text-slate-400 text-center">Keine Filme gefunden.</p>`;
+        return;
+      }
+
+      results.forEach(res => {
+        const isMatch = res.score >= 2;
+        const card = document.createElement('div');
+        card.className = `p-3 rounded-xl border flex items-center gap-3 ${
+          isMatch 
+            ? 'bg-rose-950/40 border-rose-500/60 shadow-lg shadow-rose-950/50' 
+            : 'bg-slate-800/80 border-slate-700/60'
+        }`;
+
+        card.innerHTML = `
+          <img src="${res.movie.poster}" alt="${res.movie.title}" class="w-12 h-16 object-cover rounded-lg shrink-0">
+          <div class="flex-1 min-w-0">
+            <div class="flex justify-between items-center">
+              <h4 class="font-bold text-white text-sm truncate">${res.movie.title}</h4>
+              <span class="text-xs font-black px-2 py-0.5 rounded-full ${
+                isMatch ? 'bg-rose-500 text-white' : 'bg-slate-700 text-slate-300'
+              }">${res.score} ${res.score === 1 ? 'Like' : 'Likes'}</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">${res.movie.genre} • ${res.movie.year}</p>
+            <div class="mt-1 flex flex-wrap gap-1">
+              ${res.likedBy.map(name => 
+                `<span class="text-[10px] px-1.5 py-0.5 bg-slate-900/80 text-rose-300 rounded border border-rose-500/30">♥ ${name}</span>`
+              ).join('')}
+            </div>
+          </div>
+        `;
+        matchesResultsList.appendChild(card);
+      });
+    }
+
+    if (matchResultsBtn) matchResultsBtn.addEventListener('click', openMatchResultsModal);
+    if (closeMatchResultsBtn) closeMatchResultsBtn.addEventListener('click', closeMatchResultsModal);
+    if (calculateMatchesBtn) calculateMatchesBtn.addEventListener('click', calculateMatches);
+
+    function showShareStatus(text, isError = false) {
+      if (!shareStatusMsg) return;
+      shareStatusMsg.textContent = text;
+      shareStatusMsg.className = `text-[11px] font-semibold ${isError ? 'text-rose-400' : 'text-emerald-400'}`;
+      shareStatusMsg.classList.remove('hidden');
+      setTimeout(() => {
+        shareStatusMsg.classList.add('hidden');
+      }, 3500);
+    }
+
+    function copyShareUrlToClipboard() {
+      const activeKey = tmdbApiKeyInput.value.trim() || tmdbApiKey;
+      if (!activeKey) {
+        showShareStatus(" Bitte zuerst einen API-Schlüssel eintragen!", true);
+        return;
+      }
+
+      const baseUrl = window.location.protocol + '//' + window.location.host + window.location.pathname;
+      const shareUrl = `${baseUrl}#key=${encodeURIComponent(activeKey)}`;
+
+      copyTextToClipboard(shareUrl, shareStatusMsg);
+      showShareStatus("✓ App-Link mit API-Key in die Zwischenablage kopiert!");
+    }
+
+    if (shareKeyBtn) {
+      shareKeyBtn.addEventListener('click', copyShareUrlToClipboard);
+    }
+
+    function openSettingsModal() {
+      renderFilterChips();
+      tmdbApiKeyInput.value = tmdbApiKey;
+      if (tmdbApiKey) {
+        keyStatusText.classList.remove('hidden');
+        if (shareKeyBtn) shareKeyBtn.disabled = false;
+      } else {
+        keyStatusText.classList.add('hidden');
+      }
+      settingsModal.classList.remove('hidden');
+      setTimeout(() => settingsModal.classList.remove('opacity-0'), 10);
+    }
+
+    function closeSettingsModal() {
+      settingsModal.classList.add('opacity-0');
+      setTimeout(() => settingsModal.classList.add('hidden'), 300);
+    }
+
+    settingsBtn.addEventListener('click', openSettingsModal);
+    closeSettingsBtn.addEventListener('click', closeSettingsModal);
+
+    saveSettingsBtn.addEventListener('click', async () => {
+      tmdbApiKey = tmdbApiKeyInput.value.trim();
+      saveAppState();
+
+      if (tmdbApiKey) {
+        await fetchTmdbMovies(false);
+      } else {
+        filterDeck();
+      }
+      renderCard();
+      closeSettingsModal();
+    });
+
+    resetProgressBtn.addEventListener('click', () => {
+      currentIndex = 0;
+      swipeHistory = [];
+      likedMovies = [];
+      dislikedMovies = [];
+      tmdbPage = 1;
+      isSessionMode = false;
+      isGuestMode = false;
+      saveAppState();
+      renderCard();
+      closeSettingsModal();
+    });
+
+    likeBtn.addEventListener('click', () => handleSwipe('right'));
+    dislikeBtn.addEventListener('click', () => handleSwipe('left'));
+    undoBtn.addEventListener('click', undoSwipe);
+    infoBtn.addEventListener('click', () => {
+      if (currentIndex < movieDeck.length) {
+        openDetailModal(movieDeck[currentIndex]);
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (!detailModal.classList.contains('hidden')) {
+        if (e.key === 'Escape') closeDetailModal();
+        if (e.key === 'ArrowRight') {
+          if (currentIndex < movieDeck.length) {
+            const movie = movieDeck[currentIndex];
+            swipeHistory.push({ movie, index: currentIndex, direction: 'right' });
+            if (!likedMovies.some(m => m.id === movie.id)) likedMovies.push(movie);
+            if (isSessionMode || isGuestMode) sessionBitmask.push('1');
+            currentIndex++;
+            saveAppState();
+            renderCard();
+            if (currentIndex < movieDeck.length) {
+              populateDetailContent(movieDeck[currentIndex]);
+            } else {
+              closeDetailModal();
+            }
+          }
+        }
+        if (e.key === 'ArrowLeft') {
+          if (currentIndex < movieDeck.length) {
+            const movie = movieDeck[currentIndex];
+            swipeHistory.push({ movie, index: currentIndex, direction: 'left' });
+            if (!dislikedMovies.some(m => m.id === movie.id)) dislikedMovies.push(movie);
+            if (isSessionMode || isGuestMode) sessionBitmask.push('0');
+            currentIndex++;
+            saveAppState();
+            renderCard();
+            if (currentIndex < movieDeck.length) {
+              populateDetailContent(movieDeck[currentIndex]);
+            } else {
+              closeDetailModal();
+            }
+          }
+        }
+        return;
+      }
+
+      if (!settingsModal.classList.contains('hidden') || !watchlistModal.classList.contains('hidden')) {
+        if (e.key === 'Escape') {
+          closeSettingsModal();
+          closeWatchlist();
+        }
+        return;
+      }
+
+      if (e.key === 'ArrowRight') handleSwipe('right');
+      if (e.key === 'ArrowLeft') handleSwipe('left');
+      if (e.key === 'ArrowUp') {
+        if (currentIndex < movieDeck.length) openDetailModal(movieDeck[currentIndex]);
+      }
+      if (e.key === 'r' || e.key === 'R') undoSwipe();
+    });
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      loadAppState();
+      checkUrlHashForKeyAndSession();
+      updateWatchlistBadge();
+      updateApiStatusBadge();
+      if (tmdbApiKey && !isGuestMode && !isSessionMode) {
+        await fetchTmdbMovies(false);
+      }
+      renderCard();
+    });
+
+      
+    // <!-- Service Worker Registration -->      
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js')
+        .then(reg => console.log('Service Worker registered:', reg))
+        .catch(err => console.log('Service Worker registration failed:', err));
+    }
+  </script>
+</body>
+</html>
